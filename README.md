@@ -1,11 +1,11 @@
-# SkyDeploy 🚀
+# SkyDeploy 
 
 SkyDeploy is an ultra-fast, local-first Platform-as-a-Service (PaaS) orchestration engine built for developers who want the convenience of serverless without the strict timeouts, restrictive routing, or heavy cloud billing statements. 
 
 Deploy React, Node.js, and Python web apps in zero seconds either from a ZIP, a Git repository, or generated purely from an AI Prompt natively on-device.
 
 ## ✨ Core Features
-- **Zero-Config Deployments:** Link a Git repository or upload a ZIP folder. Hardcoded app ports are dynamically patched, mapped, and deployed with zero configuration.
+- **Minimal-Config Deployments:** Link a Git repository or upload a ZIP folder. Hardcoded app ports are dynamically patched, mapped, and deployed with zero configuration.
 - **AI Development & Automated Sandbox:** Native Multi-LLM support (Ollama/Phi-3, Gemini, Claude). Ask for an app, and SkyDeploy will write, build, and deploy it. Code is automatically sanitized before running to prevent Remote Code Execution (`child_process`, `fs`). 
 - **Enterprise-Grade Container Security:** All deployments run under strict quotas (default 1GB RAM, 1 CPU limit, max 100 PIDs), drop all kernel capabilities (`--cap-drop=ALL`), and enforce `no-new-privileges` true.
 - **ZIP-Slip Prevention:** Directory traversal checks ensure no malicious nested archives can execute sandbox escapes during upload extraction.
