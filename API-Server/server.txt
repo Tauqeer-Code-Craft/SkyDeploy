@@ -1,0 +1,305 @@
+const express = require('express');
+const bodyParser = require('body-parser');
+const mongoose = require('mongoose');
+const { exec } = require('child_process');
+const fs = require('fs');
+
+const app = express();
+app.use(bodyParser.json());
+
+// ---------------------------
+// Environment / Proxy Setup
+// ---------------------------
+const SKYDEPLOY_ENV = process.env.SKYDEPLOY_ENV || 'local'; // 'local' or 'prod'
+
+const { addApp, removeApp } = require("../reverse-proxy-http/server");
+
+
+const CADDY_CONTAINER = 'skydeploy-caddy';  
+const CADDYFILE_PATH = '../reverse-proxy/Caddyfile';
+
+// ---------------------------
+// MongoDB Connection
+// ---------------------------
+const MONGO_URI = "mongodb://localhost:27017/MJ";
+if (!MONGO_URI) throw new Error("Please set MONGO_URI environment variable");
+
+mongoose.connect(MONGO_URI)
+.then(() => console.log("Connected to MongoDB"))
+.catch(err => console.error("MongoDB connection error:", err));
+
+// ---------------------------
+// App Schema
+// ---------------------------
+const appSchema = new mongoose.Schema({
+    app_name: { type: String, required: true, unique: true },
+    git_repo_url: { type: String, required: true },
+    app_type: { type: String, default: 'static' },
+    project_root: { type: String, default: '' },
+    port: { type: Number, default: 3000 },
+    container_id: String,
+    access_url: String,
+    status: { type: String, default: 'running' },
+}, { timestamps: true });
+
+const AppModel = mongoose.model('App', appSchema);
+
+// ---------------------------
+// Helper: Add app to Caddy
+// ---------------------------
+function addAppToCaddy(appName, port) {
+    const newBlock = `
+${appName}.tauqeer.site {
+    reverse_proxy localhost:${port}
+}
+`;
+    fs.appendFileSync(CADDYFILE_PATH, newBlock, 'utf8');
+
+    exec(`docker exec ${CADDY_CONTAINER} caddy reload --config /etc/caddy/Caddyfile`, (err) => {
+        if (err) return console.error('Caddy reload error:', err);
+        console.log(`Caddy reloaded for ${appName}.tauqeer.site`);
+    });
+}
+
+// ---------------------------
+// Global Port Management
+// ---------------------------
+const API_PORT = 4000;
+let GLOBAL_APP_PORT = 5000; // starting port for deployed apps
+
+function getNextPort() {
+    if (GLOBAL_APP_PORT === API_PORT) {
+        GLOBAL_APP_PORT++;
+    }
+    return GLOBAL_APP_PORT++;
+}
+
+// const lastApp = await AppModel.findOne().sort({ port: -1 });
+// let GLOBAL_APP_PORT = lastApp ? lastApp.port + 1 : 5000;
+
+
+// ---------------------------
+// Health API
+// ---------------------------
+app.get('/health', (req, res) => {
+    res.send('API is alive');
+});
+
+console.log("Registering /deploy route");
+
+// ---------------------------
+// Deploy API
+// ---------------------------
+async function deployApp({ app_name, git_repo_url, app_type, project_root,ENV_KEYS }) {
+    const existing = await AppModel.findOne({ app_name });
+    if (existing) {
+        throw new Error('App name already exists');
+    }
+
+    // Determine ports
+    const hostPort = getNextPort();                        // host port (increments globally)
+    const containerPort = app_type === 'static' ? 3000 : hostPort; // static: container 3000, server: same as host
+
+    const containerName = `skydeploy-${app_name}`;
+    const BUILD_IMAGE = 'skydeploy-build-server';
+
+    const cmd = `docker run -d --name ${containerName} -p ${hostPort}:${containerPort} -e GIT_REPOSITORY__URL="${git_repo_url}" -e APP_TYPE="${app_type}" -e PROJECT_ROOT="${project_root}" -e PORT=${containerPort} ${ENV_KEYS ? `-e ENV_KEYS="${ENV_KEYS}"` : ''} ${BUILD_IMAGE}`;
+
+    console.log('Docker run command:', cmd);
+
+    return new Promise((resolve, reject) => {
+        exec(cmd, (err, stdout, stderr) => {
+            if (err) {
+                console.error('Docker run failed:', stderr || err.message);
+                return reject(new Error(stderr || err.message));
+            }
+
+            if (!stdout) {
+                console.error('No container ID returned:', stderr);
+                return reject(new Error('Container failed to start'));
+            }
+
+            const containerId = stdout.trim();
+
+            // Determine access URL and update proxy
+            let access_url;
+            if (SKYDEPLOY_ENV === 'local') {
+                access_url = `http://${app_name}.127.0.0.1.nip.io:8080`;
+                // Pass both hostPort and containerPort to fix Nginx proxy
+                addApp(app_name, hostPort);
+                // addAppToNginx(app_name, hostPort, containerPort);
+            } else {
+                access_url = `https://${app_name}.tauqeer.site`;
+                addAppToCaddy(app_name, hostPort); // Caddy works with hostPort
+            }
+
+            const appDoc = new AppModel({
+                app_name,
+                git_repo_url,
+                app_type,
+                project_root,
+                port: hostPort,
+                container_id: containerId,
+                access_url,
+                status: 'running'
+            });
+
+            appDoc.save()
+                .then(() => {
+                    // increment global port AFTER successful deploy
+                    GLOBAL_APP_PORT++;
+                    resolve(appDoc);
+                })
+                .catch(saveErr => reject(saveErr));
+        });
+    });
+}
+
+// for python helper
+async function deployPython({
+    app_name,
+    git_repo_url,
+    project_root,
+    ENV_KEYS
+}) {
+    const existing = await AppModel.findOne({ app_name });
+    if (existing) {
+        throw new Error('App name already exists');
+    }
+
+    const hostPort = getNextPort();
+    const containerPort = 3000; // Python containers always listen on 3000
+    const containerName = `skydeploy-${app_name}`;
+    const BUILD_IMAGE = 'skydeploy-build-python';
+
+    const cmd = `docker run -d --name ${containerName} -p ${hostPort}:${containerPort} -e GIT_REPOSITORY__URL="${git_repo_url}" -e APP_TYPE="python" -e PROJECT_ROOT="${project_root}" -e PORT=${containerPort} ${ENV_KEYS ? `-e ENV_KEYS="${ENV_KEYS}"` : ''} -e APP_PREFIX=${app_name} ${BUILD_IMAGE}`.trim();
+
+
+    console.log('Docker run command:', cmd);
+
+    return new Promise((resolve, reject) => {
+        exec(cmd, (err, stdout, stderr) => {
+            if (err) {
+                return reject(new Error(stderr || err.message));
+            }
+
+            const containerId = stdout.trim();
+            if (!containerId) {
+                return reject(new Error('Container failed to start'));
+            }
+
+            let access_url;
+            if (SKYDEPLOY_ENV === 'local') {
+                access_url = `http://${app_name}.127.0.0.1.nip.io:8080`;
+                addApp(app_name, hostPort);
+            } else {
+                access_url = `https://${app_name}.tauqeer.site`;
+                addAppToCaddy(app_name, hostPort);
+            }
+
+            const appDoc = new AppModel({
+                app_name,
+                git_repo_url,
+                app_type: 'python',
+                project_root,
+                port: hostPort,
+                container_id: containerId,
+                access_url,
+                status: 'running'
+            });
+
+            appDoc.save()
+                .then(() => resolve(appDoc))
+                .catch(reject);
+        });
+    });
+}
+
+
+app.post('/deploy/static', async (req, res) => {
+    try {
+        const { app_name, git_repo_url, project_root = '',ENV_KEYS = '' } = req.body;
+
+        const app = await deployApp({
+            app_name,
+            git_repo_url,
+            app_type: 'static',
+            project_root,
+            ENV_KEYS
+        });
+
+        res.json({ success: true, ...app.toObject() });
+
+    } catch (error) {
+        res.status(400).json({ success: false, error: error.message });
+    }
+});
+
+app.post('/deploy/server', async (req, res) => {
+    try {
+        const { app_name, git_repo_url, project_root = '',ENV_KEYS = '' } = req.body;
+
+        const app = await deployApp({
+            app_name,
+            git_repo_url,
+            app_type: 'server',
+            project_root,
+            ENV_KEYS
+        });
+
+        res.json({ success: true, ...app.toObject() });
+
+    } catch (error) {
+        res.status(400).json({ success: false, error: error.message });
+    }
+});
+
+// /deploy/python 
+// streamlit / django / flask / fastapi
+app.post('/deploy/python', async (req, res) => {
+    try {
+        const {
+            app_name,
+            git_repo_url,
+            project_root = '',
+            ENV_KEYS = ''
+        } = req.body;
+
+        const app = await deployPython({
+            app_name,
+            git_repo_url,
+            app_type: 'python',
+            project_root,
+            ENV_KEYS,
+            BUILD_IMAGE: 'skydeploy-build-python'
+        });
+
+        res.json({ success: true, ...app.toObject() });
+
+    } catch (error) {
+        res.status(400).json({ success: false, error: error.message });
+    }
+});
+
+
+// ---------------------------
+// List all apps
+// ---------------------------
+app.get('/apps', async (req, res) => {
+    const apps = await AppModel.find();
+    res.json(apps);
+});
+
+// ---------------------------
+// Get single app
+// ---------------------------
+app.get('/apps/:app_name', async (req, res) => {
+    const appData = await AppModel.findOne({ app_name: req.params.app_name });
+    if (!appData) return res.status(404).json({ success: false, error: 'App not found' });
+    res.json(appData);
+});
+
+// ---------------------------
+// Start server
+// ---------------------------
+app.listen(API_PORT, () => console.log(`SkyDeploy API running on http://localhost:${API_PORT}`));

@@ -1,0 +1,19 @@
+{
+  "dependencies": {
+    "express": "^5.2.1",
+    "http": "^0.0.1-security",
+    "http-proxy": "^1.18.1",
+    "url": "^0.11.4"
+  },
+  "name": "reverse-proxy-http",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}

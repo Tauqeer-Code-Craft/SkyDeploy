@@ -1,0 +1,14 @@
+sequenceDiagram
+    participant User
+    participant API as SkyDeploy API
+    participant Engine as Build Engine (Docker)
+    participant Caddy as Reverse Proxy
+
+    User->>API: POST /deploy (Git/ZIP/Prompt)
+    API->>API: Verify Auth & Roles
+    API->>API: (If AI) Construct Code Payload & Sanitize
+    API->>API: Generate unique dynamic PORT
+    API->>Engine: Run isolated container (--cap-drop, limits)
+    Engine-->>API: Container ID returned
+    API->>Caddy: Write to Caddyfile & Reload
+    API->>User: Deployment Success & URL

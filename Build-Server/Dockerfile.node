@@ -1,0 +1,21 @@
+# Use an official Node.js LTS image
+FROM node:20-slim
+
+# Install git
+RUN apt-get update && \
+    apt-get install -y git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /home/app
+
+COPY mainN.sh mainN.sh
+COPY script.js script.js
+COPY package*.json .
+
+RUN npm install
+
+RUN chmod +x mainN.sh
+RUN chmod +x script.js
+
+ENTRYPOINT [ "/home/app/mainN.sh" ]

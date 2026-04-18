@@ -1,0 +1,67 @@
+graph TB
+    subgraph Client [Client Facing Interaction]
+        UI[React Dashboard SPA]
+        Docs[Public Documentation]
+    end
+
+    subgraph Orchestrator [SkyDeploy API Control Plane]
+        API(Express.js Route Controller)
+        Auth{JWT Validation & bcrypt}
+        DB[(SQLite Sequelize Meta Store)]
+        Replication(replication.js Native Orchestrator)
+        
+        UI -- POST /deploy/zip --> Auth
+        UI -- POST /deploy/git --> Auth
+        UI -- POST /ai-gen --> Auth
+        Auth -- 200 OK --> API
+        API <--> DB
+    end
+
+    subgraph Autonomous Pipeline [AI & Reliability Engine]
+        Ollama[Local Phi-3 Model]
+        Scanner{Diagnostic Monitor}
+        Gen[CodeGen Ast Parser]
+        
+        API -- "Natural Language Prompt" --> Gen
+        Gen -- "Context Strict Scaffold" --> Ollama
+        Ollama -- "XML React Generation" --> Gen
+        
+        Scanner -- "Poll RestartCount > Threshold" --> API
+        API -- "Fetch Latest 1000 stderr lines" --> Ollama
+        Ollama -- "Semantic Root Cause JSON" --> DB
+    end
+
+    subgraph Security Boundary [Docker Target Execution]
+        Validation{Path Traversal ZIP-Slip Trap}
+        Daemon(Docker Socket Host)
+        NodeEnv[[skydeploy-build-server]]
+        PyEnv[[skydeploy-build-python]]
+        
+        API -- "Payload Stream" --> Validation
+        Validation -- Validated Payload --> Daemon
+        Daemon -- "--cpus=1.0 --pids-limit=100 --cap-drop=ALL" --> NodeEnv
+        Daemon -- "Isolated Jail" --> PyEnv
+    end
+
+    subgraph Network Proxy [Caddy Configuration Mesh & Load Balancer]
+        Caddy(Caddy Dynamic Reverse Proxy)
+        TLS[Auto SSL/TLS Provisioner]
+        
+        API -- "Scale / Zero-Downtime Deploy" --> Replication
+        Replication -- "Socket POST /containers/create" --> Daemon
+        API -- "Round-Robin Upstream Patch via Docker DNS" --> Caddy
+        Caddy <--> TLS
+        Caddy -- "Reverse Proxy Routing" --> NodeEnv
+        Caddy -- "Reverse Proxy Routing" --> PyEnv
+        
+        UI -. SSE Log Stream .-> Caddy
+    end
+    
+    classDef default fill:#111827,stroke:#3b82f6,stroke-width:2px,color:#fff;
+    classDef highlight fill:#312e81,stroke:#a855f7,stroke-width:2px,color:#fff;
+    classDef proxy fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#fff;
+    classDef danger fill:#7f1d1d,stroke:#ef4444,stroke-width:2px,color:#fff;
+
+    class Ollama,Gen,Scanner highlight;
+    class Caddy,TLS proxy;
+    class Validation danger;

@@ -1,0 +1,33 @@
+sequenceDiagram
+    participant AppContainer as Web Application
+    participant DockerDaemon as Local Docker Socket
+    participant Monitor as Reliability Engine (API)
+    participant AIEngine as AI Diagnostic Module (Phi-3)
+    participant DB as SQLite Datastore
+    participant Frontend as React Dashboard
+
+    loop Continuous Telemetry Interval (e.g., 60s)
+        Monitor->>DockerDaemon: Poll `docker inspect` for Status
+        DockerDaemon-->>Monitor: Returns Metrics (RestartCount, CPU, Mem, Health)
+        
+        alt RestartCount > Threshold (Crash Loop Detected)
+            Monitor->>DockerDaemon: Block restart and Halt Container
+            Note over Monitor,DockerDaemon: Halting prevents Resource Exhaustion
+            
+            Monitor->>DockerDaemon: Extract latest 1,000 lines of `stderr/stdout`
+            DockerDaemon-->>Monitor: Raw Crash Logs & Stack Trace
+            
+            Monitor->>AIEngine: Pipe Raw Logs + Diagnostic Prompt Context
+            Note over AIEngine: Local LLM processes text to find exceptions
+            
+            AIEngine-->>Monitor: Return structured semantic Fix (JSON)
+            
+            Monitor->>DB: Update App Status to 'Crash Loop'
+            Monitor->>DB: Save AI Root-Cause Diagnostic Analysis
+            
+            Monitor->>Frontend: Broadcast SSE (Server-Sent Event) Update
+            Frontend-->>User: Display AI Fix Recommendation Modal
+        else Normal Operation
+            Monitor->>DB: Update Heartbeat Timestamp (OK)
+        end
+    end

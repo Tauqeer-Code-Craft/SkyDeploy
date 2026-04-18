@@ -1,0 +1,23 @@
+graph LR
+  subgraph User Input
+    API[API Endpoint]
+    Zip[AdmZip Extraction]
+    AI[AI Generator]
+  end
+
+  subgraph Sanitization Layer
+    API -->|Auth/RBAC Check| S1(Role Verified)
+    Zip -->|Zip Slip Check| S2(Path boundary verified)
+    AI -->|RCE Scan| S3(No child_process, fs, eval)
+  end
+
+  subgraph Docker Container Jail
+    S1 --> Docker
+    S2 --> Docker
+    S3 --> Docker
+    Docker[Docker Runner]
+    Docker -->|--cap-drop=ALL| C1(Drop Kernel Privileges)
+    Docker -->|no-new-privileges| C2(Prevent SUID/SGID)
+    Docker -->|--pids-limit=100| C3(Prevent Fork Bombs)
+    Docker -->|--memory=512m| C4(Prevent OOM)
+  end

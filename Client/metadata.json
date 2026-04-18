@@ -1,0 +1,5 @@
+{
+  "name": "SkyDeploy",
+  "description": "A modern, Vercel-style mini-PaaS dashboard for deploying and managing applications.",
+  "requestFramePermissions": []
+}
