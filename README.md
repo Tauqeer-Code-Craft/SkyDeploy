@@ -45,7 +45,7 @@ This performs a full NPM install for both Client and API, and subsequently build
 ```powershell
 .\start.ps1
 ```
-This kicks off the React Vite bundler and the Node API server simultaneously. Access the Web UI at `http://localhost:5173`.
+This kicks off the React Vite bundler and the Node API server simultaneously. Access the Web UI at `http://localhost:3000`.
 
 ## 🥊 SkyDeploy vs. Traditional Cloud PaaS
 
